@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>虚拟遗境 - 数据库ER图</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Microsoft YaHei', sans-serif;
+      background: #0a0e1a;
+      color: #e8ecf4;
+      padding: 40px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 24px;
+      background: linear-gradient(135deg, #00d4ff, #7c3aed);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 14px;
+      margin-bottom: 40px;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+    .mermaid svg {
+      max-width: 100%;
+    }
+    .legend {
+      max-width: 800px;
+      margin: 40px auto 0;
+      background: #111827;
+      border: 1px solid #2a3450;
+      border-radius: 8px;
+      padding: 20px;
+    }
+    .legend h3 { margin-bottom: 12px; font-size: 16px; color: #00d4ff; }
+    .legend-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .legend-item {
+      font-size: 12px;
+      color: #94a3b8;
+      padding: 4px 10px;
+      background: #1a2035;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>虚拟遗境-跨时空修复 数据库ER图</h1>
+  <p class="subtitle">PostgreSQL 核心业务表关系图 · 守望者小队</p>
+
+  <div class="mermaid">
+erDiagram
+    sys_user {
+        uuid user_id PK
+        varchar username
+        varchar real_name
+        varchar role
+        varchar specialty
+        varchar organization
+    }
+
+    artifact_info {
+        uuid artifact_id PK
+        varchar artifact_code
+        varchar name
+        varchar era
+        varchar category
+        varchar level
+        varchar material
+        uuid created_by FK
+    }
+
+    artifact_archive {
+        uuid archive_id PK
+        uuid artifact_id FK
+        varchar archive_type
+        varchar title
+        varchar file_url
+    }
+
+    artifact_material_test {
+        uuid test_id PK
+        uuid artifact_id FK
+        varchar test_method
+        decimal cu_percent
+        decimal sn_percent
+        decimal pb_percent
+    }
+
+    detection_task {
+        uuid task_id PK
+        uuid artifact_id FK
+        varchar status
+        integer total_damages
+    }
+
+    damage_record {
+        uuid damage_id PK
+        uuid task_id FK
+        uuid artifact_id FK
+        varchar damage_code
+        varchar damage_type
+        varchar position
+        varchar level
+        decimal length
+        decimal width
+        decimal depth
+        decimal area
+        uuid parent_damage_id FK
+    }
+
+    damage_trend {
+        uuid trend_id PK
+        uuid damage_id FK
+        date record_date
+        decimal current_length
+        decimal growth_rate
+    }
+
+    repair_material {
+        uuid material_id PK
+        varchar name
+        varchar category
+        varchar adhesion_strength
+        varchar humidity_resistance
+    }
+
+    repair_plan {
+        uuid plan_id PK
+        uuid artifact_id FK
+        uuid material_id FK
+        varchar plan_name
+        varchar status
+        uuid agent_discussion_id FK
+    }
+
+    repair_step {
+        uuid step_id PK
+        uuid plan_id FK
+        integer step_order
+        varchar step_name
+    }
+
+    agent_discussion {
+        uuid discussion_id PK
+        uuid artifact_id FK
+        integer round_number
+        varchar agent_role
+        text message_content
+    }
+
+    collab_session {
+        uuid session_id PK
+        uuid artifact_id FK
+        varchar session_name
+        uuid host_user_id FK
+        varchar status
+    }
+
+    collab_participant {
+        uuid id PK
+        uuid session_id FK
+        uuid user_id FK
+        varchar device_type
+    }
+
+    collab_annotation {
+        uuid annotation_id PK
+        uuid session_id FK
+        uuid artifact_id FK
+        uuid user_id FK
+        varchar annotation_type
+        jsonb position_3d
+        text content
+    }
+
+    collab_message {
+        uuid message_id PK
+        uuid session_id FK
+        uuid user_id FK
+        varchar message_type
+        text content
+    }
+
+    report {
+        uuid report_id PK
+        uuid artifact_id FK
+        uuid session_id FK
+        varchar report_type
+        varchar title
+        jsonb content
+    }
+
+    sys_user ||--o{ artifact_info : "creates"
+    sys_user ||--o{ collab_session : "hosts"
+    sys_user ||--o{ collab_annotation : "makes"
+    sys_user ||--o{ collab_message : "sends"
+    artifact_info ||--o{ artifact_archive : "has"
+    artifact_info ||--o{ artifact_material_test : "has"
+    artifact_info ||--o{ detection_task : "undergoes"
+    artifact_info ||--o{ repair_plan : "has"
+    artifact_info ||--o{ collab_session : "discussed_in"
+    artifact_info ||--o{ collab_annotation : "annotated_on"
+    artifact_info ||--o{ report : "generates"
+    detection_task ||--o{ damage_record : "detects"
+    damage_record ||--o{ damage_trend : "tracks"
+    damage_record ||--o{ damage_record : "extends_from"
+    repair_material ||--o{ repair_plan : "used_in"
+    repair_plan ||--o{ repair_step : "contains"
+    agent_discussion ||--o{ repair_plan : "generates"
+    collab_session ||--o{ collab_participant : "includes"
+    collab_session ||--o{ collab_annotation : "records"
+    collab_session ||--o{ collab_message : "contains"
+    collab_session ||--o{ report : "produces"
+  </div>
+
+  <div class="legend">
+    <h3>图例说明</h3>
+    <div class="legend-row">
+      <span class="legend-item">||--o{ 一对多关系</span>
+      <span class="legend-item">PK 主键</span>
+      <span class="legend-item">FK 外键</span>
+    </div>
+    <div class="legend-row">
+      <span class="legend-item">16张核心业务表</span>
+      <span class="legend-item">存储引擎：PostgreSQL</span>
+      <span class="legend-item">辅助存储：Neo4j / InfluxDB / MinIO</span>
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      er: {
+        useMaxWidth: true,
+        entityPadding: 15,
+        fontSize: 13
+      }
+    });
+  </script>
+</body>
+</html>
