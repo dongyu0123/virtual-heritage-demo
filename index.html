@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>虚拟遗境 - 跨时空修复</title>
+  <link rel="stylesheet" href="css/global.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+  <!-- ==================== 首页 ==================== -->
+  <div id="landing-view" class="view active">
+    <canvas id="particle-bg"></canvas>
+    <div class="landing-content">
+      <div class="landing-badge">第十九届全国大学生软件创新大赛</div>
+      <h1 class="landing-title">
+        <span class="title-main">虚拟遗境</span>
+        <span class="title-divider"></span>
+        <span class="title-sub">跨时空修复</span>
+      </h1>
+      <p class="landing-tagline">基于多模态知识图谱RAG的全息文物档案库</p>
+      <p class="landing-desc">融合 VR 沉浸式交互 · AI 智能分析 · RAG 多模态检索 · 数字孪生协同</p>
+
+      <div class="module-cards">
+        <div class="module-card" data-module="archive">
+          <div class="card-icon"><i class="fas fa-landmark"></i></div>
+          <h3>全息档案</h3>
+          <p>多模态知识图谱<br/>场景化语义检索</p>
+        </div>
+        <div class="module-card" data-module="detection">
+          <div class="card-icon"><i class="fas fa-microscope"></i></div>
+          <h3>病害检测</h3>
+          <p>AI细粒度损伤识别<br/>智能量化评估</p>
+        </div>
+        <div class="module-card" data-module="repair">
+          <div class="card-icon"><i class="fas fa-wrench"></i></div>
+          <h3>修复模拟</h3>
+          <p>多智能体协同推演<br/>虚拟沙盒试错</p>
+        </div>
+        <div class="module-card" data-module="collaborate">
+          <div class="card-icon"><i class="fas fa-users"></i></div>
+          <h3>协同会诊</h3>
+          <p>跨终端多人协同<br/>VR沉浸式交互</p>
+        </div>
+      </div>
+
+      <button class="enter-btn" id="enterSystem">
+        <span>进入系统</span>
+        <i class="fas fa-arrow-right"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== 主工作区 ==================== -->
+  <div id="workspace-view" class="view">
+    <!-- 顶部导航栏 -->
+    <header class="top-bar">
+      <div class="top-left">
+        <span class="logo-small">虚拟遗境</span>
+        <span class="sep">|</span>
+        <span class="artifact-name">西周青铜鼎</span>
+        <span class="artifact-tag">一级文物</span>
+      </div>
+      <nav class="mode-tabs">
+        <button class="mode-tab active" data-mode="archive"><i class="fas fa-landmark"></i> 全息档案</button>
+        <button class="mode-tab" data-mode="detection"><i class="fas fa-microscope"></i> 病害检测</button>
+        <button class="mode-tab" data-mode="repair"><i class="fas fa-wrench"></i> 修复模拟</button>
+        <button class="mode-tab" data-mode="collaborate"><i class="fas fa-users"></i> 协同会诊</button>
+      </nav>
+      <div class="top-right">
+        <div class="user-avatars">
+          <div class="avatar" title="专家A - 考古">A</div>
+          <div class="avatar" title="专家B - 材料">B</div>
+          <div class="avatar" title="专家C - 工艺">C</div>
+        </div>
+        <div class="connection-status"><i class="fas fa-wifi"></i> 在线</div>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <div class="main-content">
+      <!-- 三维视口 -->
+      <div class="viewport" id="viewport">
+        <canvas id="three-canvas"></canvas>
+        <!-- 视口工具栏 -->
+        <div class="viewport-toolbar">
+          <button class="vt-btn" id="btnRotate" title="旋转"><i class="fas fa-sync-alt"></i></button>
+          <button class="vt-btn" id="btnZoomIn" title="放大"><i class="fas fa-search-plus"></i></button>
+          <button class="vt-btn" id="btnZoomOut" title="缩小"><i class="fas fa-search-minus"></i></button>
+          <button class="vt-btn" id="btnReset" title="重置视角"><i class="fas fa-expand"></i></button>
+          <button class="vt-btn" id="btnAnnotate" title="标注模式"><i class="fas fa-map-pin"></i></button>
+        </div>
+        <!-- 模型信息悬浮 -->
+        <div class="model-info-overlay" id="modelInfoOverlay" style="display:none">
+          <div class="info-tag">裂缝 #03</div>
+          <div class="info-detail">
+            <div>长度: 12.4cm</div>
+            <div>宽度: 0.3cm</div>
+            <div>等级: <span class="level-badge level-danger">严重</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧信息面板 -->
+      <aside class="side-panel" id="sidePanel">
+        <!-- 面板由各模式动态切换内容 -->
+        <div class="panel-section" id="panelContent">
+          <!-- 默认：全息档案面板 -->
+        </div>
+      </aside>
+    </div>
+
+    <!-- 底部时间轴 -->
+    <div class="timeline-bar" id="timelineBar">
+      <div class="timeline-label">裂缝发展时间轴</div>
+      <div class="timeline-track">
+        <div class="timeline-range">
+          <input type="range" id="timelineSlider" min="2019" max="2024" step="0.1" value="2019" />
+          <div class="timeline-markers">
+            <span class="marker" data-year="2019">2019</span>
+            <span class="marker" data-year="2020">2020</span>
+            <span class="marker" data-year="2021">2021</span>
+            <span class="marker highlight" data-year="2022">2022 雨季</span>
+            <span class="marker" data-year="2023">2023</span>
+            <span class="marker" data-year="2024">2024</span>
+          </div>
+          <div class="timeline-progress" id="timelineProgress"></div>
+        </div>
+      </div>
+      <div class="timeline-info" id="timelineInfo">
+        <span class="year-display" id="yearDisplay">2019年</span>
+        <span class="crack-status" id="crackStatus">初始状态 · 裂缝长度 3.2cm</span>
+      </div>
+    </div>
+
+    <!-- AI助手浮窗 -->
+    <div class="ai-assistant" id="aiAssistant" style="display:none">
+      <div class="ai-header">
+        <span><i class="fas fa-robot"></i> AI修复助手</span>
+        <button class="ai-close" id="aiClose"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="ai-body" id="aiChatBody">
+        <!-- 对话消息 -->
+      </div>
+      <div class="ai-input">
+        <input type="text" id="aiInput" placeholder="输入问题或语音指令..." />
+        <button id="aiSend"><i class="fas fa-paper-plane"></i></button>
+        <button id="aiVoice"><i class="fas fa-microphone"></i></button>
+      </div>
+    </div>
+
+    <!-- AI助手触发按钮 -->
+    <button class="ai-fab" id="aiFab"><i class="fas fa-robot"></i></button>
+
+    <!-- 报告预览浮层 -->
+    <div class="report-overlay" id="reportOverlay" style="display:none">
+      <div class="report-panel">
+        <div class="report-header">
+          <h2><i class="fas fa-file-alt"></i> 协同会诊报告</h2>
+          <button class="report-close" id="reportClose"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="report-body" id="reportBody">
+          <!-- 报告内容 -->
+        </div>
+        <div class="report-footer">
+          <button class="btn-primary" id="exportPdf"><i class="fas fa-download"></i> 导出PDF</button>
+          <button class="btn-secondary" id="saveArchive"><i class="fas fa-archive"></i> 归档</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标注工具 -->
+    <div class="annotation-tool" id="annotationTool" style="display:none">
+      <div class="annot-header">添加标注</div>
+      <div class="annot-body">
+        <textarea id="annotText" placeholder="输入标注内容..."></textarea>
+        <div class="annot-colors">
+          <span class="color-dot active" data-color="#ff6b6b"></span>
+          <span class="color-dot" data-color="#ffd93d"></span>
+          <span class="color-dot" data-color="#6bcb77"></span>
+          <span class="color-dot" data-color="#4d96ff"></span>
+        </div>
+      </div>
+      <div class="annot-footer">
+        <button class="btn-sm" id="annotCancel">取消</button>
+        <button class="btn-sm btn-primary" id="annotConfirm">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载过渡 -->
+  <div class="loading-overlay" id="loadingOverlay" style="display:none">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">正在加载三维模型...</div>
+    <div class="loading-progress"><div class="loading-bar" id="loadingBar"></div></div>
+  </div>
+
+  <script src="js/utils/mock-data.js"></script>
+  <script src="js/modules/timeline.js"></script>
+  <script src="js/modules/viewer.js"></script>
+  <script src="js/modules/detection.js"></script>
+  <script src="js/modules/repair.js"></script>
+  <script src="js/modules/collaboration.js"></script>
+  <script src="js/modules/ai-assistant.js"></script>
+  <script src="js/modules/report.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
