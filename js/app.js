@@ -210,7 +210,7 @@ const App = (() => {
         <li><span class="label">材质</span><span class="val">${artifact.material}</span></li>
         <li><span class="label">尺寸</span><span class="val">${artifact.size}</span></li>
         <li><span class="label">重量</span><span class="val">${artifact.weight}</span></li>
-        <li><span class="label">出土</span><span class="val">${artifact.origin}</span></li>
+        <li><span class="label">来源</span><span class="val">${artifact.origin}</span></li>
         <li><span class="label">收藏</span><span class="val">${artifact.collection}</span></li>
       </ul>
 

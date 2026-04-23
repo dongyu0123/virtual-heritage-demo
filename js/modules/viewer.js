@@ -1,15 +1,31 @@
 /**
  * Three.js 三维文物查看器
- * 程序化生成西周青铜鼎模型
+ * 加载真实青铜鼎 GLB 模型 + 表面热力色块病害可视化
  */
 const Viewer = (() => {
   let scene, camera, renderer, canvas;
-  let dingGroup, crackGroup, annotationGroup;
+  let dingGroup, annotationGroup;
   let raycaster, mouse;
   let isRotating = true;
+  let damagesVisible = false;
   let annotateMode = false;
   let animationId;
   let onModelClick = null;
+  let scanProgress = 0;
+  let isScanning = false;
+  let modelBounds = null;
+
+  // 病害区域：围绕鼎身的不同方向和高度
+  // dirAngle: 绕鼎的角度位置, heightRatio: 高度比例(0=底,1=顶)
+  // sizeRatio: 病害区域大小占模型高度的比例
+  const damageZones = [
+    { id: 'D01', dirAngle: -0.8, heightRatio: 0.42, sizeRatio: 0.12, color: 0xf59e0b },
+    { id: 'D02', dirAngle: 0.9,  heightRatio: 0.38, sizeRatio: 0.08, color: 0x3b82f6 },
+    { id: 'D03', dirAngle: 0.0,  heightRatio: 0.38, sizeRatio: 0.18, color: 0xef4444 },
+    { id: 'D04', dirAngle: 3.14, heightRatio: 0.12, sizeRatio: 0.15, color: 0xf97316 },
+    { id: 'D05', dirAngle: 2.2,  heightRatio: 0.72, sizeRatio: 0.08, color: 0xf59e0b },
+    { id: 'D06', dirAngle: -1.8, heightRatio: 0.62, sizeRatio: 0.07, color: 0x3b82f6 },
+  ];
 
   function init() {
     canvas = document.getElementById('three-canvas');
@@ -19,17 +35,14 @@ const Viewer = (() => {
     const w = container.clientWidth;
     const h = container.clientHeight;
 
-    // 场景
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x06080f);
     scene.fog = new THREE.FogExp2(0x06080f, 0.015);
 
-    // 相机
     camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100);
     camera.position.set(0, 2, 6);
     camera.lookAt(0, 0.8, 0);
 
-    // 渲染器
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setSize(w, h);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -37,34 +50,20 @@ const Viewer = (() => {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
+    renderer.outputEncoding = THREE.sRGBEncoding;
 
-    // 灯光
     setupLights();
-
-    // 地面
     setupGround();
 
-    // 构建青铜鼎
-    buildBronzeDing();
-
-    // 裂缝标记
-    crackGroup = new THREE.Group();
-    scene.add(crackGroup);
-    buildCracks();
-
-    // 标注组
     annotationGroup = new THREE.Group();
     scene.add(annotationGroup);
 
-    // 射线检测
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
 
-    // 事件
     canvas.addEventListener('click', onCanvasClick);
     window.addEventListener('resize', onResize);
 
-    // 鼠标拖拽旋转
     let isDragging = false, prevX = 0, prevY = 0;
     canvas.addEventListener('mousedown', (e) => { isDragging = true; prevX = e.clientX; prevY = e.clientY; });
     canvas.addEventListener('mousemove', (e) => {
@@ -82,7 +81,253 @@ const Viewer = (() => {
       camera.position.z = Math.max(3, Math.min(10, camera.position.z + e.deltaY * 0.005));
     });
 
+    loadModel();
     animate();
+  }
+
+  function loadModel() {
+    const loader = new THREE.GLTFLoader();
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const loadingBar = document.getElementById('loadingBar');
+    if (loadingOverlay) loadingOverlay.style.display = 'flex';
+
+    loader.load(
+      'assets/ding_food_vessel_11th-10th_century_bce.glb',
+      (gltf) => {
+        dingGroup = new THREE.Group();
+        dingGroup.name = 'dingGroup';
+        const model = gltf.scene;
+
+        // 计算包围盒并缩放
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 2.5 / maxDim;
+
+        model.scale.set(scale, scale, scale);
+        model.position.sub(center.multiplyScalar(scale));
+        model.position.y += 0.5;
+
+        model.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        dingGroup.add(model);
+
+        // 整体居中到平台上方
+        const newBox = new THREE.Box3().setFromObject(dingGroup);
+        const newCenter = newBox.getCenter(new THREE.Vector3());
+        dingGroup.position.y -= newCenter.y - 0.7;
+
+        scene.add(dingGroup);
+
+        // 记录模型在 dingGroup 局部坐标系中的包围盒
+        modelBounds = new THREE.Box3().setFromObject(model);
+
+        // 延迟到下一帧构建病害色块，确保世界矩阵已正确计算
+        requestAnimationFrame(() => {
+          try {
+            buildDamageOverlays();
+          } catch (e) {
+            console.warn('病害色块构建失败，使用回退方案:', e);
+            buildDamageOverlaysFallback();
+          }
+        });
+
+        if (loadingOverlay) loadingOverlay.style.display = 'none';
+      },
+      (xhr) => {
+        if (xhr.total > 0 && loadingBar) {
+          loadingBar.style.width = ((xhr.loaded / xhr.total) * 100) + '%';
+        }
+      },
+      (error) => {
+        console.error('模型加载失败:', error);
+        if (loadingOverlay) loadingOverlay.style.display = 'none';
+      }
+    );
+  }
+
+  /**
+   * 基于射线投射，精确定位鼎身表面的病害色块位置
+   * 从模型中心向指定方向发射射线，命中模型表面的点即为色块位置
+   */
+  function buildDamageOverlays() {
+    if (!modelBounds) return;
+
+    const min = modelBounds.min;
+    const max = modelBounds.max;
+    const height = max.y - min.y;
+    const centerX = (min.x + max.x) / 2;
+    const centerY = (min.y + max.y) / 2;
+    const centerZ = (min.z + max.z) / 2;
+    const modelCenter = new THREE.Vector3(centerX, centerY, centerZ);
+
+    // 收集 dingGroup 内所有 mesh，确保矩阵已更新
+    const meshes = [];
+    dingGroup.traverse(child => { if (child.isMesh) meshes.push(child); });
+    dingGroup.updateMatrixWorld(true);
+
+    // 从包围盒外部发射射线的距离
+    const maxRadius = Math.max(max.x - min.x, max.z - min.z) * 0.8;
+
+    damageZones.forEach(zone => {
+      const patchSize = height * zone.sizeRatio;
+      const targetY = min.y + height * zone.heightRatio;
+
+      // 从模型外部朝向中心发射射线，必中模型外表面
+      const localOrigin = new THREE.Vector3(
+        centerX + Math.sin(zone.dirAngle) * maxRadius,
+        targetY,
+        centerZ + Math.cos(zone.dirAngle) * maxRadius
+      );
+      const worldOrigin = localOrigin.clone().applyMatrix4(dingGroup.matrixWorld);
+
+      // 方向：朝向中心轴
+      const localDir = new THREE.Vector3(
+        -Math.sin(zone.dirAngle), 0, -Math.cos(zone.dirAngle)
+      ).normalize();
+      const worldDir = localDir.clone().transformDirection(dingGroup.matrixWorld).normalize();
+
+      const rc = new THREE.Raycaster(worldOrigin, worldDir, 0.01, maxRadius * 3);
+      const hits = rc.intersectObjects(meshes, false);
+
+      let surfacePoint, surfaceNormal;
+
+      if (hits.length > 0) {
+        surfacePoint = hits[0].point.clone();
+        const invMat = new THREE.Matrix4().copy(dingGroup.matrixWorld).invert();
+        surfacePoint.applyMatrix4(invMat);
+        surfaceNormal = hits[0].face
+          ? hits[0].face.normal.clone().transformDirection(hits[0].object.matrixWorld)
+          : new THREE.Vector3(Math.sin(zone.dirAngle), 0, Math.cos(zone.dirAngle)).normalize();
+      } else {
+        // 回退：包围盒估算
+        const radiusX = (max.x - min.x) / 2;
+        const radiusZ = (max.z - min.z) / 2;
+        const avgRadius = (radiusX + radiusZ) / 2;
+        const bellyFactor = 1 - Math.pow(2 * zone.heightRatio - 1, 2) * 0.3;
+        const surfaceR = avgRadius * bellyFactor;
+        surfacePoint = new THREE.Vector3(
+          centerX + Math.sin(zone.dirAngle) * surfaceR,
+          targetY,
+          centerZ + Math.cos(zone.dirAngle) * surfaceR
+        );
+        surfaceNormal = new THREE.Vector3(Math.sin(zone.dirAngle), 0, Math.cos(zone.dirAngle)).normalize();
+        console.warn('病害', zone.id, '射线未命中，使用估算位置');
+      }
+
+      // 病害组
+      const patchGroup = new THREE.Group();
+      patchGroup.position.copy(surfacePoint);
+      patchGroup.userData = { id: zone.id, type: 'damageGroup' };
+
+      // 朝向表面外侧
+      const lookTarget = surfacePoint.clone().add(surfaceNormal);
+      patchGroup.lookAt(lookTarget);
+
+      // 第1层：大面积淡色光晕
+      const haloGeo = new THREE.CircleGeometry(patchSize * 1.5, 32);
+      const haloMat = new THREE.MeshBasicMaterial({
+        color: zone.color, transparent: true, opacity: 0,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+      const halo = new THREE.Mesh(haloGeo, haloMat);
+      halo.position.z = 0.003;
+      halo.userData = { layer: 'halo' };
+      patchGroup.add(halo);
+
+      // 第2层：主要色块
+      const mainGeo = new THREE.CircleGeometry(patchSize, 32);
+      const mainMat = new THREE.MeshBasicMaterial({
+        color: zone.color, transparent: true, opacity: 0,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+      const mainPatch = new THREE.Mesh(mainGeo, mainMat);
+      mainPatch.position.z = 0.005;
+      mainPatch.userData = { layer: 'main' };
+      patchGroup.add(mainPatch);
+
+      // 第3层：中心高亮
+      const coreGeo = new THREE.CircleGeometry(patchSize * 0.4, 24);
+      const coreMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+      const core = new THREE.Mesh(coreGeo, coreMat);
+      core.position.z = 0.008;
+      core.userData = { layer: 'core' };
+      patchGroup.add(core);
+
+      // 中心标记点
+      const dotGeo = new THREE.SphereGeometry(patchSize * 0.08, 8, 8);
+      const dotMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0,
+        depthTest: false,
+      });
+      const dot = new THREE.Mesh(dotGeo, dotMat);
+      dot.position.z = 0.012;
+      dot.userData = { layer: 'dot' };
+      patchGroup.add(dot);
+
+      dingGroup.add(patchGroup);
+    });
+  }
+
+  /**
+   * 回退方案：用包围盒几何估算表面位置（不依赖射线投射）
+   */
+  function buildDamageOverlaysFallback() {
+    if (!modelBounds) return;
+
+    const min = modelBounds.min;
+    const max = modelBounds.max;
+    const height = max.y - min.y;
+    const centerX = (min.x + max.x) / 2;
+    const centerZ = (min.z + max.z) / 2;
+    const radiusX = (max.x - min.x) / 2;
+    const radiusZ = (max.z - min.z) / 2;
+
+    damageZones.forEach(zone => {
+      const patchSize = height * zone.sizeRatio;
+      const targetY = min.y + height * zone.heightRatio;
+      const bellyFactor = 1 - Math.pow(2 * zone.heightRatio - 1, 2) * 0.3;
+      const avgRadius = (radiusX + radiusZ) / 2 * bellyFactor;
+
+      const sx = centerX + Math.sin(zone.dirAngle) * avgRadius;
+      const sz = centerZ + Math.cos(zone.dirAngle) * avgRadius;
+
+      const outward = new THREE.Vector3(Math.sin(zone.dirAngle), 0, Math.cos(zone.dirAngle)).normalize();
+
+      const patchGroup = new THREE.Group();
+      patchGroup.position.set(sx, targetY, sz);
+      patchGroup.userData = { id: zone.id, type: 'damageGroup' };
+      patchGroup.lookAt(patchGroup.position.clone().add(outward));
+
+      const layers = [
+        { geo: new THREE.CircleGeometry(patchSize * 1.5, 32), z: 0.003, opacity: 0, layer: 'halo' },
+        { geo: new THREE.CircleGeometry(patchSize, 32), z: 0.005, opacity: 0, layer: 'main' },
+        { geo: new THREE.CircleGeometry(patchSize * 0.4, 24), z: 0.008, opacity: 0, layer: 'core', color: 0xffffff },
+        { geo: new THREE.SphereGeometry(patchSize * 0.08, 8, 8), z: 0.012, opacity: 0, layer: 'dot', color: 0xffffff },
+      ];
+
+      layers.forEach(l => {
+        const mat = new THREE.MeshBasicMaterial({
+          color: l.color || zone.color, transparent: true, opacity: 0,
+          side: THREE.DoubleSide, depthWrite: false,
+        });
+        const mesh = new THREE.Mesh(l.geo, mat);
+        mesh.position.z = l.z;
+        mesh.userData = { layer: l.layer };
+        patchGroup.add(mesh);
+      });
+
+      dingGroup.add(patchGroup);
+    });
   }
 
   function setupLights() {
@@ -103,201 +348,26 @@ const Viewer = (() => {
     rimLight.position.set(0, 3, -3);
     scene.add(rimLight);
 
-    // 底部光
     const bottomLight = new THREE.PointLight(0x1a1a2e, 0.3, 5);
     bottomLight.position.set(0, -1, 0);
     scene.add(bottomLight);
   }
 
   function setupGround() {
-    // 圆形地面
     const groundGeo = new THREE.CircleGeometry(8, 64);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x0a0e1a,
-      roughness: 0.9,
-      metalness: 0.1
-    });
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x0a0e1a, roughness: 0.9, metalness: 0.1 });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.5;
     ground.receiveShadow = true;
     scene.add(ground);
 
-    // 发光圆环
     const ringGeo = new THREE.RingGeometry(2.5, 2.55, 64);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0x00d4ff, side: THREE.DoubleSide, transparent: true, opacity: 0.3 });
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = -0.49;
     scene.add(ring);
-  }
-
-  function buildBronzeDing() {
-    dingGroup = new THREE.Group();
-
-    const bronzeMat = new THREE.MeshStandardMaterial({
-      color: 0x5a7a4a,
-      roughness: 0.4,
-      metalness: 0.7,
-      envMapIntensity: 0.8,
-    });
-
-    const darkBronzeMat = new THREE.MeshStandardMaterial({
-      color: 0x3a5a3a,
-      roughness: 0.5,
-      metalness: 0.6,
-    });
-
-    // 鼎身 - 使用LatheGeometry创建旋转体
-    const bodyPoints = [];
-    // 底部
-    bodyPoints.push(new THREE.Vector2(0.6, 0));
-    bodyPoints.push(new THREE.Vector2(0.85, 0.05));
-    bodyPoints.push(new THREE.Vector2(1.0, 0.15));
-    bodyPoints.push(new THREE.Vector2(1.1, 0.4));
-    // 腹部
-    bodyPoints.push(new THREE.Vector2(1.35, 0.8));
-    bodyPoints.push(new THREE.Vector2(1.45, 1.2));
-    bodyPoints.push(new THREE.Vector2(1.45, 1.5));
-    bodyPoints.push(new THREE.Vector2(1.35, 1.8));
-    // 颈部
-    bodyPoints.push(new THREE.Vector2(1.15, 2.0));
-    bodyPoints.push(new THREE.Vector2(1.1, 2.1));
-    // 口沿
-    bodyPoints.push(new THREE.Vector2(1.15, 2.2));
-    bodyPoints.push(new THREE.Vector2(1.2, 2.25));
-    bodyPoints.push(new THREE.Vector2(1.18, 2.3));
-    bodyPoints.push(new THREE.Vector2(1.1, 2.28));
-
-    const bodyGeo = new THREE.LatheGeometry(bodyPoints, 48);
-    const body = new THREE.Mesh(bodyGeo, bronzeMat);
-    body.castShadow = true;
-    body.receiveShadow = true;
-    body.name = 'dingBody';
-    dingGroup.add(body);
-
-    // 三足
-    for (let i = 0; i < 3; i++) {
-      const angle = (i * Math.PI * 2) / 3 - Math.PI / 2;
-      const legGeo = new THREE.CylinderGeometry(0.12, 0.16, 0.7, 12);
-      const leg = new THREE.Mesh(legGeo, darkBronzeMat);
-      leg.position.set(Math.cos(angle) * 0.8, -0.35, Math.sin(angle) * 0.8);
-      leg.castShadow = true;
-      leg.name = 'leg';
-      dingGroup.add(leg);
-
-      // 足底
-      const footGeo = new THREE.CylinderGeometry(0.18, 0.2, 0.08, 12);
-      const foot = new THREE.Mesh(footGeo, darkBronzeMat);
-      foot.position.set(Math.cos(angle) * 0.8, -0.72, Math.sin(angle) * 0.8);
-      dingGroup.add(foot);
-    }
-
-    // 双耳
-    for (let side of [-1, 1]) {
-      const earGroup = new THREE.Group();
-
-      // 耳身（圆环）
-      const earGeo = new THREE.TorusGeometry(0.22, 0.05, 8, 16, Math.PI);
-      const ear = new THREE.Mesh(earGeo, darkBronzeMat);
-      ear.rotation.z = Math.PI;
-      earGroup.add(ear);
-
-      // 耳根连接
-      const connGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.15, 8);
-      const conn1 = new THREE.Mesh(connGeo, darkBronzeMat);
-      conn1.position.set(-0.18, -0.05, 0);
-      earGroup.add(conn1);
-      const conn2 = new THREE.Mesh(connGeo, darkBronzeMat);
-      conn2.position.set(0.18, -0.05, 0);
-      earGroup.add(conn2);
-
-      earGroup.position.set(side * 1.4, 2.15, 0);
-      earGroup.rotation.y = side > 0 ? 0 : Math.PI;
-      dingGroup.add(earGroup);
-    }
-
-    // 纹饰带（装饰条纹）
-    const bandGeo = new THREE.TorusGeometry(1.42, 0.03, 8, 48);
-    const bandMat = new THREE.MeshStandardMaterial({ color: 0x6a8a5a, roughness: 0.3, metalness: 0.8 });
-    const band = new THREE.Mesh(bandGeo, bandMat);
-    band.position.y = 1.2;
-    band.rotation.x = Math.PI / 2;
-    dingGroup.add(band);
-
-    const band2 = new THREE.Mesh(bandGeo.clone(), bandMat);
-    band2.position.y = 1.9;
-    band2.rotation.x = Math.PI / 2;
-    band2.scale.set(0.82, 0.82, 0.82);
-    dingGroup.add(band2);
-
-    // 浮雕纹饰示意（腹部小凸起，模拟兽面纹）
-    for (let i = 0; i < 12; i++) {
-      const angle = (i * Math.PI * 2) / 12;
-      const decoGeo = new THREE.SphereGeometry(0.06, 6, 6);
-      const deco = new THREE.Mesh(decoGeo, bandMat);
-      deco.position.set(
-        Math.cos(angle) * 1.38,
-        1.5 + (i % 2) * 0.15,
-        Math.sin(angle) * 1.38
-      );
-      deco.scale.set(1, 1.5, 0.5);
-      dingGroup.add(deco);
-    }
-
-    dingGroup.position.y = 0.7;
-    scene.add(dingGroup);
-  }
-
-  function buildCracks() {
-    // 裂缝 #01 - 腹部左侧
-    addCrackLine(
-      [new THREE.Vector3(-0.9, 1.6, 0.8), new THREE.Vector3(-0.95, 1.4, 0.85), new THREE.Vector3(-1.0, 1.2, 0.9)],
-      0xf59e0b, 'D01'
-    );
-
-    // 裂缝 #02 - 腹部右侧
-    addCrackLine(
-      [new THREE.Vector3(0.85, 1.5, 0.9), new THREE.Vector3(0.9, 1.35, 0.88)],
-      0x3b82f6, 'D02'
-    );
-
-    // 裂缝 #03 - 腹部正面（主要裂缝）
-    addCrackLine(
-      [new THREE.Vector3(-0.3, 1.8, 1.3), new THREE.Vector3(-0.2, 1.6, 1.35), new THREE.Vector3(0.0, 1.4, 1.4), new THREE.Vector3(0.15, 1.2, 1.38), new THREE.Vector3(0.25, 1.0, 1.32)],
-      0xef4444, 'D03'
-    );
-
-    // 裂缝高亮（半透明区域）
-    const highlightGeo = new THREE.PlaneGeometry(0.8, 1.2);
-    const highlightMat = new THREE.MeshBasicMaterial({
-      color: 0xef4444,
-      transparent: true,
-      opacity: 0,
-      side: THREE.DoubleSide,
-      depthTest: false
-    });
-    const highlight = new THREE.Mesh(highlightGeo, highlightMat);
-    highlight.position.set(0, 1.4, 1.45);
-    highlight.rotation.x = -0.15;
-    highlight.name = 'crackHighlight';
-    crackGroup.add(highlight);
-  }
-
-  function addCrackLine(points, color, id) {
-    const curve = new THREE.CatmullRomCurve3(points);
-    const geo = new THREE.TubeGeometry(curve, 20, 0.012, 6, false);
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.userData = { id, type: 'crack' };
-    crackGroup.add(mesh);
-
-    // 发光效果
-    const glowMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0 });
-    const glowGeo = new THREE.TubeGeometry(curve, 20, 0.025, 6, false);
-    const glow = new THREE.Mesh(glowGeo, glowMat);
-    glow.userData = { id, type: 'crackGlow' };
-    crackGroup.add(glow);
   }
 
   function onCanvasClick(e) {
@@ -319,11 +389,9 @@ const Viewer = (() => {
   function onResize() {
     if (!canvas || !camera || !renderer) return;
     const container = canvas.parentElement;
-    const w = container.clientWidth;
-    const h = container.clientHeight;
-    camera.aspect = w / h;
+    camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(w, h);
+    renderer.setSize(container.clientWidth, container.clientHeight);
   }
 
   function animate() {
@@ -333,82 +401,116 @@ const Viewer = (() => {
       dingGroup.rotation.y += 0.003;
     }
 
-    // 裂缝发光动画
-    const time = Date.now() * 0.001;
-    crackGroup.children.forEach(child => {
-      if (child.userData.type === 'crackGlow') {
-        child.material.opacity = 0.15 + Math.sin(time * 2) * 0.05;
+    // 扫描渐显动画
+    if (isScanning) {
+      scanProgress += 0.012;
+      if (scanProgress >= 1.2) {
+        scanProgress = 1.2;
+        isScanning = false;
       }
-    });
+      applyDamageOpacity(scanProgress);
+    }
+
+    // 呼吸脉冲
+    if (damagesVisible && !isScanning) {
+      const t = Date.now() * 0.001;
+      forEachDamageLayer((patchGroup, idx) => {
+        const halo = patchGroup.children.find(c => c.userData.layer === 'halo');
+        const dot = patchGroup.children.find(c => c.userData.layer === 'dot');
+        if (halo) halo.material.opacity = 0.15 + Math.sin(t * 1.5 + idx * 1.2) * 0.05;
+        if (dot) dot.material.opacity = 0.6 + Math.sin(t * 3 + idx) * 0.3;
+      });
+    }
 
     renderer.render(scene, camera);
   }
 
-  /* ====== 公共接口 ====== */
-  function showCracks(show, year) {
-    const data = MockData.crackTimeline;
-    const maxYear = 2024;
-    const progress = ((year || 2019) - 2019) / (maxYear - 2019);
-
-    crackGroup.children.forEach(child => {
-      if (child.userData.type === 'crack') {
-        child.material.opacity = show ? 0.9 : 0;
-      }
-      if (child.userData.type === 'crackGlow') {
-        child.material.opacity = show ? (0.15 + progress * 0.2) : 0;
-      }
-      if (child.name === 'crackHighlight') {
-        child.material.opacity = show ? progress * 0.12 : 0;
+  function forEachDamageLayer(callback) {
+    if (!dingGroup) return;
+    let idx = 0;
+    dingGroup.children.forEach(child => {
+      if (child.userData.type === 'damageGroup') {
+        callback(child, idx++);
       }
     });
   }
 
-  function showHighlight(damageId) {
-    // 重置所有
-    crackGroup.children.forEach(child => {
-      if (child.userData.type === 'crack' && child.userData.id !== damageId) {
-        child.material.opacity = 0.5;
-      }
-      if (child.userData.type === 'crackGlow' && child.userData.id !== damageId) {
-        child.material.opacity = 0.1;
-      }
+  function applyDamageOpacity(progress) {
+    const total = damageZones.length;
+    forEachDamageLayer((patchGroup, idx) => {
+      const localProg = Math.max(0, Math.min(1, progress * total - idx));
+      const halo = patchGroup.children.find(c => c.userData.layer === 'halo');
+      const main = patchGroup.children.find(c => c.userData.layer === 'main');
+      const core = patchGroup.children.find(c => c.userData.layer === 'core');
+      const dot  = patchGroup.children.find(c => c.userData.layer === 'dot');
+      if (halo) halo.material.opacity = localProg * 0.15;
+      if (main) main.material.opacity = localProg * 0.45;
+      if (core) core.material.opacity = localProg * 0.25;
+      if (dot)  dot.material.opacity = localProg * 0.8;
     });
-    // 高亮选中
-    crackGroup.children.forEach(child => {
-      if (child.userData.id === damageId) {
-        child.material.opacity = 1;
-        if (child.userData.type === 'crackGlow') {
-          child.material.opacity = 0.4;
-        }
-      }
+  }
+
+  /* ====== 公共接口 ====== */
+
+  function showCracks(show, year) {
+    damagesVisible = show;
+    if (show) {
+      scanProgress = 0;
+      isScanning = true;
+    } else {
+      isScanning = false;
+      forEachDamageLayer((patchGroup) => {
+        patchGroup.children.forEach(c => { c.material.opacity = 0; });
+      });
+    }
+  }
+
+  function showHighlight(damageId) {
+    forEachDamageLayer((patchGroup) => {
+      const isTarget = patchGroup.userData.id === damageId;
+      const halo = patchGroup.children.find(c => c.userData.layer === 'halo');
+      const main = patchGroup.children.find(c => c.userData.layer === 'main');
+      const core = patchGroup.children.find(c => c.userData.layer === 'core');
+      const dot  = patchGroup.children.find(c => c.userData.layer === 'dot');
+      if (halo) halo.material.opacity = isTarget ? 0.3 : 0.05;
+      if (main) main.material.opacity = isTarget ? 0.7 : 0.12;
+      if (core) core.material.opacity = isTarget ? 0.4 : 0.05;
+      if (dot)  dot.material.opacity = isTarget ? 1 : 0.2;
     });
   }
 
   function showRepairPlan(planColor, progress) {
-    // 在裂缝#03上方显示修复效果
-    crackGroup.children.forEach(child => {
-      if (child.userData.id === 'D03' && child.userData.type === 'crack') {
-        if (progress > 0) {
-          child.material.color.set(planColor);
-          child.material.opacity = 1 - progress * 0.5;
-        } else {
-          child.material.color.set(0xef4444);
+    forEachDamageLayer((patchGroup) => {
+      if (patchGroup.userData.id === 'D03') {
+        const main = patchGroup.children.find(c => c.userData.layer === 'main');
+        const halo = patchGroup.children.find(c => c.userData.layer === 'halo');
+        if (main) {
+          if (progress > 0) {
+            main.material.color.set(planColor);
+            main.material.opacity = 0.7 - progress * 0.4;
+          } else {
+            main.material.color.set(0xef4444);
+          }
+        }
+        if (halo && progress > 0) {
+          halo.material.color.set(planColor);
         }
       }
     });
   }
 
   function resetRepair() {
-    crackGroup.children.forEach(child => {
-      if (child.userData.id === 'D03' && child.userData.type === 'crack') {
-        child.material.color.set(0xef4444);
+    forEachDamageLayer((patchGroup) => {
+      if (patchGroup.userData.id === 'D03') {
+        const main = patchGroup.children.find(c => c.userData.layer === 'main');
+        const halo = patchGroup.children.find(c => c.userData.layer === 'halo');
+        if (main) main.material.color.set(0xef4444);
+        if (halo) halo.material.color.set(0xef4444);
       }
     });
   }
 
-  function toggleRotation(val) {
-    isRotating = val;
-  }
+  function toggleRotation(val) { isRotating = val; }
 
   function setAnnotateMode(val, callback) {
     annotateMode = val;
@@ -425,7 +527,6 @@ const Viewer = (() => {
     sphere.position.y += 0.05;
     annotationGroup.add(sphere);
 
-    // 连线
     const line = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([
         point.clone().add(new THREE.Vector3(0, 0.05, 0)),
@@ -441,9 +542,7 @@ const Viewer = (() => {
   function resetView() {
     camera.position.set(0, 2, 6);
     camera.lookAt(0, 0.8, 0);
-    if (dingGroup) {
-      dingGroup.rotation.set(0, 0, 0);
-    }
+    if (dingGroup) dingGroup.rotation.set(0, 0, 0);
     isRotating = true;
   }
 
