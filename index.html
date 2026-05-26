@@ -21,7 +21,7 @@
         <span class="title-divider"></span>
         <span class="title-sub">跨时空修复</span>
       </h1>
-      <p class="landing-tagline">基于多模态知识图谱RAG的全息文物档案库</p>
+      <p class="landing-tagline">基于多模态知识图谱RAG的文物全息修复与协同推演系统</p>
       <p class="landing-desc">融合 VR 沉浸式交互 · AI 智能分析 · RAG 多模态检索 · 数字孪生协同</p>
 
       <div class="module-cards">
@@ -85,6 +85,13 @@
       <!-- 三维视口 -->
       <div class="viewport" id="viewport">
         <canvas id="three-canvas"></canvas>
+        <!-- 模型切换选择器 -->
+        <div class="model-selector" id="modelSelector">
+          <button class="model-btn active" data-model="ding" title="商末周初青铜食器鼎">青铜鼎</button>
+          <button class="model-btn" data-model="buddha01" title="彬县佛头（正面）">佛头·正</button>
+          <button class="model-btn" data-model="buddha02" title="彬县佛头（左侧）">佛头·左</button>
+          <button class="model-btn" data-model="buddha03" title="彬县佛头（右侧）">佛头·右</button>
+        </div>
         <!-- 视口工具栏 -->
         <div class="viewport-toolbar">
           <button class="vt-btn" id="btnRotate" title="旋转"><i class="fas fa-sync-alt"></i></button>

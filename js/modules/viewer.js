@@ -1,6 +1,6 @@
 /**
  * Three.js 三维文物查看器
- * 加载真实青铜鼎 GLB 模型 + 表面热力色块病害可视化
+ * 多模型切换 + 表面热力色块病害可视化
  */
 const Viewer = (() => {
   let scene, camera, renderer, canvas;
@@ -14,6 +14,15 @@ const Viewer = (() => {
   let scanProgress = 0;
   let isScanning = false;
   let modelBounds = null;
+  let currentModelId = 'ding';
+
+  // 模型注册表
+  const modelRegistry = {
+    ding:     { path: 'assets/ding_food_vessel_11th-10th_century_bce.glb', name: '商末周初青铜食器鼎', hasDamage: true },
+    buddha01: { path: 'assets/binxian_buddha_01.glb', name: '彬县佛头（正面）', hasDamage: false },
+    buddha02: { path: 'assets/binxian_buddha_02.glb', name: '彬县佛头（左侧）', hasDamage: false },
+    buddha03: { path: 'assets/binxian_buddha_03.glb', name: '彬县佛头（右侧）', hasDamage: false },
+  };
 
   // 病害区域：围绕鼎身的不同方向和高度
   // dirAngle: 绕鼎的角度位置, heightRatio: 高度比例(0=底,1=顶)
@@ -81,18 +90,47 @@ const Viewer = (() => {
       camera.position.z = Math.max(3, Math.min(10, camera.position.z + e.deltaY * 0.005));
     });
 
-    loadModel();
+    loadModel('ding');
     animate();
   }
 
-  function loadModel() {
+  function switchModel(modelId) {
+    if (!modelRegistry[modelId] || modelId === currentModelId) return;
+    currentModelId = modelId;
+    damagesVisible = false;
+
+    // 清除旧模型
+    if (dingGroup) {
+      scene.remove(dingGroup);
+      dingGroup.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+          else child.material.dispose();
+        }
+      });
+      dingGroup = null;
+    }
+
+    // 清除病害色块
+    annotationGroup.children.forEach(c => {
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+    });
+    while (annotationGroup.children.length) annotationGroup.remove(annotationGroup.children[0]);
+
+    loadModel(modelId);
+  }
+
+  function loadModel(modelId) {
+    const config = modelRegistry[modelId || 'ding'];
     const loader = new THREE.GLTFLoader();
     const loadingOverlay = document.getElementById('loadingOverlay');
     const loadingBar = document.getElementById('loadingBar');
     if (loadingOverlay) loadingOverlay.style.display = 'flex';
 
     loader.load(
-      'assets/ding_food_vessel_11th-10th_century_bce.glb',
+      config.path,
       (gltf) => {
         dingGroup = new THREE.Group();
         dingGroup.name = 'dingGroup';
@@ -128,15 +166,17 @@ const Viewer = (() => {
         // 记录模型在 dingGroup 局部坐标系中的包围盒
         modelBounds = new THREE.Box3().setFromObject(model);
 
-        // 延迟到下一帧构建病害色块，确保世界矩阵已正确计算
-        requestAnimationFrame(() => {
-          try {
-            buildDamageOverlays();
-          } catch (e) {
-            console.warn('病害色块构建失败，使用回退方案:', e);
-            buildDamageOverlaysFallback();
-          }
-        });
+        // 仅青铜鼎模型构建病害色块
+        if (config.hasDamage) {
+          requestAnimationFrame(() => {
+            try {
+              buildDamageOverlays();
+            } catch (e) {
+              console.warn('病害色块构建失败，使用回退方案:', e);
+              buildDamageOverlaysFallback();
+            }
+          });
+        }
 
         if (loadingOverlay) loadingOverlay.style.display = 'none';
       },
@@ -554,6 +594,6 @@ const Viewer = (() => {
   return {
     init, showCracks, showHighlight, showRepairPlan, resetRepair,
     toggleRotation, setAnnotateMode, addAnnotation,
-    zoomIn, zoomOut, resetView, destroy
+    zoomIn, zoomOut, resetView, destroy, switchModel
   };
 })();

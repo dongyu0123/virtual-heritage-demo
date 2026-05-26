@@ -26,6 +26,16 @@ const App = (() => {
       Viewer.toggleRotation(btn.classList.contains('active'));
     });
 
+    // 模型切换
+    document.querySelectorAll('.model-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const modelId = e.currentTarget.dataset.model;
+        document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        Viewer.switchModel(modelId);
+      });
+    });
+
     // 标注模式
     document.getElementById('btnAnnotate').addEventListener('click', (e) => {
       const btn = e.currentTarget;

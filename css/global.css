@@ -314,6 +314,38 @@ input, textarea { font-family: inherit; }
 }
 
 /* 视口工具栏 */
+.model-selector {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+.model-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: rgba(17, 24, 39, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.model-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+.model-btn.active {
+  background: rgba(59, 130, 246, 0.25);
+  color: #60a5fa;
+  border-color: #3b82f6;
+}
+
 .viewport-toolbar {
   position: absolute;
   left: 16px;
